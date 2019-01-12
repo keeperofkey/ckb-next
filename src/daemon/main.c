@@ -4,6 +4,9 @@
 #include "led.h"
 #include "notify.h"
 #include <ckbnextconfig.h>
+#ifdef OS_WINDOWS
+#include <windows.h>
+#endif
 
 static int main_ac;
 static char **main_av;
@@ -139,28 +142,46 @@ int main(int argc, char** argv){
         }
     }
 
-#ifdef OS_WINDOWS
-#warning PID check is a stub
-#else
     // Check PID, quit if already running
     char pidpath[strlen(devpath) + 6];
     snprintf(pidpath, sizeof(pidpath), "%s0/pid", devpath);
     FILE* pidfile = fopen(pidpath, "r");
     if(pidfile){
+#ifdef OS_WINDOWS
+        int pid;
+#else
         pid_t pid;
+#endif
         if(fscanf(pidfile, "%d", &pid) == EOF)
             ckb_err("PID fscanf returned EOF (%s)\n", strerror(errno));
         fclose(pidfile);
         if(pid > 0){
+#ifdef OS_WINDOWS
+            int pidres = 0;
+            HANDLE pidHandle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
+            if(pidHandle == NULL || pidHandle == INVALID_HANDLE_VALUE)
+            {  }else {
+
+
+
+            DWORD exitCode = 0;
+            pidres = (GetExitCodeProcess(pidHandle, &exitCode) || exitCode == STILL_ACTIVE);
+
+            CloseHandle(pidHandle);
+            }
+
+#else
+            int pidres = !kill(pid, 0);
+#endif
             // kill -s 0 checks if the PID is active but doesn't send a signal
-            if(!kill(pid, 0)){
+            if(pidres){
                 ckb_fatal_nofile("ckb-next-daemon is already running (PID %d). Try `killall ckb-next-daemon`.\n", pid);
                 ckb_fatal_nofile("(If you're certain the process is dead, delete %s and try again)\n", pidpath);
                 return 0;
             }
         }
     }
-#endif
+
     // Read parameters
     int forceroot = 1;
     for(int i = 1; i < argc; i++){
@@ -229,11 +250,12 @@ int main(int argc, char** argv){
     sigdelset(&signals, SIGUSR1);
     // Set up signal handlers for quitting the service.
     sigprocmask(SIG_SETMASK, &signals, 0);
-    signal(SIGTERM, sighandler);
-    signal(SIGINT, sighandler);
     signal(SIGQUIT, sighandler);
     signal(SIGUSR1, (void (*)())restart);
-#endif
+    #endif
+    signal(SIGTERM, sighandler);
+    signal(SIGINT, sighandler);
+
     // Start the USB system
     int result = usbmain();
     quit();
